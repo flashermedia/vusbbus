@@ -1,5 +1,4 @@
-USB HASP key emulator, based on USB bus driver
-Copyright (c) 2004 Chingachguk, Denger2k, tch2000 All Rights Reserved
+USB HASP key emulator, based on USB bus driver by Chingachguk, Denger2k, tch2000
 ----
 
 This emulator and it sources are intended ONLY for legal use. Thus, legal 
