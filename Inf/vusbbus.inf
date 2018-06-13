@@ -1,0 +1,71 @@
+;/*++
+;
+;Copyright (c) 2004 Chingachguk & Denger2k All rights Reserved
+;
+;Module Name:
+;
+;    VUSBBUS.INF
+;
+;Abstract:
+;    INF file for installing virtual USB bus enumerator driver
+;
+;--*/
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%MSFT%
+DriverVer=10/29/2004, 0.01.0000
+CatalogFile=vusbbus.cat
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskId1%,,,""
+
+[SourceDisksFiles]
+vusbbus.sys  = 1,,
+
+;*****************************************
+; Virtual USB Bus Install Section
+;*****************************************
+
+[Manufacturer]
+%StdMfg%=Standard
+
+[Standard]
+;
+; These are the virtual USB bus pnp ids
+;
+
+%VUsbBus.DeviceDesc%=VUsbBus_Device, root\vusbbus
+
+[VUsbBus_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+vusbbus.sys
+
+
+;-------------- Service installation
+[VUsbBus_Device.NT.Services]
+AddService = vusbbus,%SPSVCINST_ASSOCSERVICE%, vusb_Service_Inst
+
+; -------------- vusb driver install sections
+[vusb_Service_Inst]
+DisplayName    = %vusb.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START 
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\vusbbus.sys
+LoadOrderGroup = Extended Base
+
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+MSFT = "Chingachguk & Denger2k"
+StdMfg = "(Standard system devices)"
+DiskId1 = "Virtual Usb Bus Installation Disk #1"
+VUsbBus.DeviceDesc = "Virtual Usb Bus Enumerator"
+vusb.SVCDESC = "Virtual Usb Bus Enumerator"

@@ -1,0 +1,13 @@
+TARGETNAME=VUsbBus
+TARGETTYPE=DRIVER
+TARGETPATH=obj
+
+MSC_WARNING_LEVEL=-W3 -WX
+
+SOURCES= vusb.rc \
+         vusb.c \
+         pnp.c \
+         power.c \
+         buspdo.c \
+         USBKeyEmu.c \
+         EncDecSim.cpp

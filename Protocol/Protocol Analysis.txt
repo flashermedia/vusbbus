@@ -1,0 +1,202 @@
+///////////////////////////////////////////////////////////////////
+// Описание протокола USB HASP ключа
+// Copyright (c) 2004 Chingachguk & Denger2k All Rights Reserved
+///////////////////////////////////////////////////////////////////
+HASP USB ключ является низкоскоростным USB-устройством, поэтому для
+него доступны всего два способа передачи данных по шине:
+1. Transfer Type=Control, Maximum Packet Size=8
+2. Transfer Type=Interrupt, Maximum Packet Size<8
+Аладдин использует режим 1 для обмена с ключом.
+
+///////////////////////////////////////////////////////////////////
+// Описание протокола обмена
+///////////////////////////////////////////////////////////////////
+Обмен происходит в полудуплексном режиме следующим образом:
+1. Драйвер aksusb формирует заголовок пакета с запросом к ключу
+(SETUP token), в котором указывает:
+- тип обмена (request type) - vendor
+- приемник пакета - endpoint 0 (control)
+- направление передачи данных в фазе обмена данных - от устройства к хосту
+- в служебных полях SETUP token пакета (bRequest, wValue, wIndex, wLenght)
+содержится структура с запросом к ключу следующего вида:
+    typedef struct _KEY_REQUEST {
+        UCHAR   majorFnCode;    // Номер запрашиваемой ф-и (имеет тип KEY_FN_LIST)
+        USHORT  param1,         // Параметры для функции
+                param2, param3;
+    } KEY_REQUEST, *PKEY_REQUEST;
+
+    // Номера реализуемых ключом функций
+    enum KEY_FN_LIST {
+        KEY_FN_SET_CHIPER_KEYS          = 0x80,
+        KEY_FN_CHECK_PASS               = 0x81,
+        KEY_FN_READ_3WORDS              = 0x82,
+        KEY_FN_WRITE_WORD               = 0x83,
+        KEY_FN_READ_ST                  = 0x84,
+        KEY_FN_READ_NETMEMORY_3WORDS    = 0x8B,
+        KEY_FN_HASH_DWORD               = 0x98
+    };
+
+2. Ключ, после получения пакета SETUP token, выполняет запрошенную функцию
+и в фазе передачи данных передает ответ драйверу. Пакет данных от
+ключа имеет следующий вид:
+    typedef struct _KEY_RESPONSE {
+        UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+                encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+        UCHAR   data[16];           // Результат выполнения операции
+    } KEY_RESPONSE, *PKEY_RESPONSE;
+    
+    // Статусы выполнения операций
+    enum KEY_OPERATION_STATUS {
+        KEY_OPERATION_STATUS_OK                     = 0,
+        KEY_OPERATION_STATUS_ERROR                  = 1,
+        KEY_OPERATION_STATUS_INVALID_MEMORY_ADDRESS = 4,
+        KEY_OPERATION_STATUS_LAST                   = 0x1F
+    };
+Необходимо отметить, что ответ ключа может быть длиннее 8 байт. В последнем
+случае контроллер шины USB автоматически проводит несколько циклов обмена,
+объединяет полученные пакеты данных в один и передает его драйверу ключа.
+
+Почти все обмены ключа и драйвера зашифрованы. Установка сеансовых ключей шифрования
+производиться при первом обращении к ключу функцией KEY_FN_SET_CHIPER_KEYS. В дальнейшем
+в старший байт сеансового ключа шифрования Key2 после цикла обмена заноситься значение
+KEY_RESPONSE::encodedStatus, таким образом производиться изменение сеансовых ключей.
+
+///////////////////////////////////////////////////////////////////
+// Описание функций, выполняемых ключом
+///////////////////////////////////////////////////////////////////
+1. Установка сеансовых ключей шифрования (KEY_FN_SET_CHIPER_KEYS).
+Key1 задается драйвером при помощи данной функции, Key2 в ключе и драйвере
+при инициализации принимается 0xA0CB.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_SET_CHIPER_KEYS;
+keyRequest.param1=Key1;
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+
+    UCHAR   keyType1,           // Тип ключа,       0x02
+            keyType2;           // Субтип ключа,    0x0A - HASP, 0x1A - TimeHASP
+    UCHAR   unknown;            // 0x00
+    USHORT  productionSN;       // Номер ключа, данное значение разное для ключей с одинаковыми паролями
+} KEY_RESPONSE_0x80;
+Все поля пакета KEY_RESPONSE_0x80 зашифрованы.
+
+2. Предъявление пароля ключу (KEY_FN_CHECK_PASS).
+Без предъявления правильного пароля ключ не будет отвечать на
+функции с номером больше, чем у KEY_FN_SET_CHIPER_KEYS.
+Предъявление пароля осуществляется функцией KEY_FN_CHECK_PASS.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_CHECK_PASS;
+keyRequest.param1=PasswordLow;
+keyRequest.param2=PasswordHigh;
+Поля пакета keyRequest.param1, keyRequest.param2 зашифрованы.
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+
+    USHORT  memorySuze;         // Размер памяти ключа в байтах
+    UCHAR   unknown;            // 0x10
+} KEY_RESPONSE_0x81;
+Все поля пакета KEY_RESPONSE_0x81 зашифрованы.
+
+3. Чтение данных из памяти (KEY_FN_READ_3WORDS).
+Данная функция осуществляет чтение до 3 слов из обычной памяти ключа.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_READ_3WORDS;
+keyRequest.param1=wordOffset;   // Смещение первого читаемого слова
+Поле пакета keyRequest.param1 зашифровано.
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+
+    USHORT  memory[3];          // Три слова из памяти ключа, начиная со смещения wordOffset
+} KEY_RESPONSE_0x82;
+Все поля пакета KEY_RESPONSE_0x82 зашифрованы.
+
+4. Запись данных в память (KEY_FN_WRITE_WORD).
+Данная функция осуществляет запись 1 слова в обычную память ключа.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_WRITE_WORD;
+keyRequest.param1=wordOffset;   // Смещение, по которому будет записано слово
+keyRequest.param2=data;         // Записываемое слово
+Поля пакета keyRequest.param1, keyRequest.param2 зашифрованы.
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+} KEY_RESPONSE_0x83;
+Все поля пакета KEY_RESPONSE_0x83 зашифрованы.
+
+5. Чтение Secret Table из ключа (KEY_FN_READ_ST).
+Данная функция осуществляет чтение 8 байт Secret Table из ключа.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_READ_ST;
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+    UCHAR   st[8];              // Secret table ключа
+} KEY_RESPONSE_0x84;
+Все поля пакета KEY_RESPONSE_0x84 зашифрованы.
+
+6. Чтение данных из NetMemory памяти ключа (KEY_FN_READ_NETMEMORY_3WORDS).
+Данная функция осуществляет чтение до 3 слов из NetMemory памяти ключа.
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_READ_NETMEMORY_3WORDS;
+keyRequest.param1=wordOffset;   // Смещение первого читаемого слова
+Поле пакета keyRequest.param1 зашифровано.
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+
+    USHORT  netMemory[3];       // Три слова из NetMemory памяти ключа, начиная со смещения wordOffset
+} KEY_RESPONSE_0x8B;
+Все поля пакета KEY_RESPONSE_0x8B зашифрованы.
+Типичное содержимое NetMemory USB HASP-ключа:
+
+Смещение: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+Данные  : 12 1A 12 0F 03 00 70 00 02 FF 00 00 FF FF FF FF
+
+Расшифровка:
+12 1A 12 0F - Serial number ключа
+03 00 - Кодированный тип ключа?
+70 00 - Объем памяти ключа в байтах
+02 FF - ?
+00 00 - Количество пользователей для сетевого ключа (00 00 - локальный)
+FF FF - ?
+FF    - Тип ключа (FF - локальный, FE - Net, FD - Time)
+FF - ?
+
+7. MAC для DWORDа (KEY_FN_HASH_DWORD).
+Данная функция осуществляет шифрование DWORDа секретным паролем ключа (MAC).
+
+Вход:
+keyRequest.majorFnCode=KEY_FN_HASH_DWORD;
+keyRequest.param1=DWORDlow;     // младшие 16 бит шифруемого DWORDа
+keyRequest.param2=DWORDhigh;    // старшие 16 бит шифруемого DWORDа
+Поля пакета keyRequest.param1, keyRequest.param2 зашифрованы.
+
+Выход:
+typedef struct {
+    UCHAR   status,             // Статус выполнения операции (имеет тип KEY_OPERATION_STATUS)
+            encodedStatus;      // CRC полей status ответа и majorFnCode запроса
+
+    ULONG   hashedDWORD;        // Хешированный DWORD
+} KEY_RESPONSE_0x98;
+Все поля пакета KEY_RESPONSE_0x98 зашифрованы.
